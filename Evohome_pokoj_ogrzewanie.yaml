@@ -1,0 +1,161 @@
+blueprint:
+  name: Evohome – pokój wg obecności osoby (komfort / eco / nocny harmonogram)
+  description: >
+    Steruje strefą Evohome dla jednego pokoju na podstawie obecności osoby.
+    W dzień ustawia komfort, gdy osoba w domu i eco, gdy jej nie ma.
+    O wskazanej godzinie nocnej resetuje override tylko, jeśli osoba jest w domu.
+    Jeśli osoba wróci w nocy, override jest kasowany przy powrocie.
+  domain: automation
+  input:
+    person_entity:
+      name: Osoba (person)
+      description: Osoba, której obecność ma sterować ogrzewaniem pokoju.
+      selector:
+        entity:
+          domain: person
+
+    climate_entity:
+      name: Strefa grzewcza (climate)
+      description: Strefa Evohome odpowiadająca pokojowi.
+      selector:
+        entity:
+          domain: climate
+
+    day_start:
+      name: Godzina rozpoczęcia dnia
+      description: Od tej godziny zaczyna działać logika komfort/eco.
+      default: "06:00:00"
+      selector:
+        time: {}
+
+    night_start:
+      name: Godzina rozpoczęcia harmonogramu nocnego
+      description: O tej godzinie (gdy osoba jest w domu) kasujemy override i oddajemy sterowanie harmonogramowi Evohome (np. 22:30).
+      default: "22:30:00"
+      selector:
+        time: {}
+
+    comfort_temp:
+      name: Temperatura komfortowa (w dzień, gdy osoba w domu)
+      default: 21
+      selector:
+        number:
+          min: 5
+          max: 30
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: slider
+
+    eco_temp:
+      name: Temperatura eco (w dzień, gdy osoby nie ma)
+      default: 18
+      selector:
+        number:
+          min: 5
+          max: 30
+          step: 0.5
+          unit_of_measurement: "°C"
+          mode: slider
+
+    absence_delay:
+      name: Opóźnienie przed przejściem na eco
+      description: Jak długo osoba musi być poza domem, zanim ustawimy temperaturę eco.
+      default:
+        hours: 0
+        minutes: 15
+        seconds: 0
+      selector:
+        duration: {}
+
+mode: single
+
+variables:
+  person: !input person_entity
+  climate: !input climate_entity
+  comfort_temp: !input comfort_temp
+  eco_temp: !input eco_temp
+  day_start_time: !input day_start
+  night_start_time: !input night_start
+
+trigger:
+  # Rano – sprawdź, czy osoba jest w domu i ustaw komfort/eco na start dnia
+  - platform: time
+    at: !input day_start
+    id: day_start
+
+  # Start harmonogramu nocnego
+  - platform: time
+    at: !input night_start
+    id: night_reset
+
+  # Zmiana obecności na "w domu"
+  - platform: state
+    entity_id: !input person_entity
+    to: "home"
+    id: person_home
+
+  # Zmiana obecności na "poza domem" z opóźnieniem (eco)
+  - platform: state
+    entity_id: !input person_entity
+    to: "not_home"
+    for: !input absence_delay
+    id: person_away
+
+action:
+  - choose:
+      # 1) NOC: o night_start kasujemy override TYLKO, gdy osoba jest w domu
+      - conditions:
+          - condition: template
+            value_template: >
+              {{ trigger.id == 'night_reset' and is_state(person, 'home') }}
+        sequence:
+          - service: evohome.clear_zone_override
+            data:
+              entity_id: !input climate_entity
+
+      # 2) DZIEŃ: działa tylko pomiędzy day_start a night_start
+      - conditions:
+          - condition: template
+            value_template: >
+              {% set now_time = now().time() %}
+              {% set ds = strptime(day_start_time, '%H:%M:%S').time() %}
+              {% set ns = strptime(night_start_time, '%H:%M:%S').time() %}
+              {{ ds <= now_time < ns }}
+        sequence:
+          - choose:
+              # 2a) Osoba w domu → komfort
+              - conditions:
+                  - condition: state
+                    entity_id: !input person_entity
+                    state: "home"
+                sequence:
+                  - service: evohome.set_zone_override
+                    data:
+                      entity_id: !input climate_entity
+                      setpoint: !input comfort_temp
+
+              # 2b) Osoby nie ma → eco
+              - conditions:
+                  - condition: state
+                    entity_id: !input person_entity
+                    state: "not_home"
+                sequence:
+                  - service: evohome.set_zone_override
+                    data:
+                      entity_id: !input climate_entity
+                      setpoint: !input eco_temp
+    default:
+      # 3) OSOBA WRACA W NOCY: jeśli wraca po night_start, kasujemy override
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: >
+                  {% set now_time = now().time() %}
+                  {% set ds = strptime(day_start_time, '%H:%M:%S').time() %}
+                  {% set ns = strptime(night_start_time, '%H:%M:%S').time() %}
+                  {{ trigger.id == 'person_home'
+                     and (now_time >= ns or now_time < ds) }}
+            sequence:
+              - service: evohome.clear_zone_override
+                data:
+                  entity_id: !input climate_entity
