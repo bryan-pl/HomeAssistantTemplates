@@ -1,10 +1,11 @@
 blueprint:
-  name: Evohome – pokój wg obecności osoby (komfort / eco / nocny harmonogram)
+  name: Evohome – pokój wg obecności osoby
   description: >
     Steruje strefą Evohome dla jednego pokoju na podstawie obecności osoby.
     W dzień ustawia komfort, gdy osoba w domu i eco, gdy jej nie ma.
     O wskazanej godzinie nocnej resetuje override tylko, jeśli osoba jest w domu.
     Jeśli osoba wróci w nocy, override jest kasowany przy powrocie.
+    V.1
   domain: automation
   input:
     person_entity:
