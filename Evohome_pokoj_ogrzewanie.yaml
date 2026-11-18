@@ -110,9 +110,12 @@ action:
             value_template: >
               {{ trigger.id == 'night_reset' and is_state(person, 'home') }}
         sequence:
-          - service: evohome.clear_zone_override
+          - service: evohome.set_zone_override
             data:
               entity_id: !input climate_entity
+              set_point: !input eco_temp
+              duration: 
+                minutes: 2
 
       # 2) DZIEŃ: działa tylko pomiędzy day_start a night_start
       - conditions:
@@ -157,6 +160,10 @@ action:
                   {{ trigger.id == 'person_home'
                      and (now_time >= ns or now_time < ds) }}
             sequence:
-              - service: evohome.clear_zone_override
+              - service: evohome.set_zone_override
                 data:
                   entity_id: !input climate_entity
+                  set_point: !input eco_temp
+                  duration: 
+                    minutes: 2
+
